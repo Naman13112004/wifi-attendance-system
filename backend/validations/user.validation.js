@@ -15,11 +15,17 @@ const isValidObjectId = (id) => {
 const userSignupSchema = z.object({
   name: z.string().min(3, "Name must be at least 3 characters"),
   email: z.string().email("Invalid email format"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  studentId: z.string().min(5, "Student ID must be at least 5 characters"),
-  classId: z.string().refine(isValidObjectId, {
-    message: "Invalid class ID format"
-  }).optional()
+  password: z.string()
+    .min(6, "Password must be at least 6 characters")
+    .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+    .regex(/[0-9]/, "Password must contain at least one number"),
+  studentId: z.string()
+    .min(5, "Student ID must be at least 5 characters")
+    .regex(/^[a-zA-Z0-9]+$/, "Student ID must be alphanumeric"),
+  classId: z.string()
+    .refine(isValidObjectId, { message: "Invalid class ID format" })
+    .optional()
+    .or(z.literal('')) // Allow empty string for unenrolled students
 });
 
 // User signin validation

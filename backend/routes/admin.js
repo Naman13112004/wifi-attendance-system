@@ -2,12 +2,13 @@ const { Router } = require("express");
 const { teacherModel, classModel, attendanceModel, studentModel } = require("../db");
 const { adminMiddleware } = require("../middlewares/admin.js");
 const { validateRequest } = require("../middlewares/validation");
-const { 
-    adminSignupSchema, 
-    adminSigninSchema, 
-    createClassSchema, 
-    updateAttendanceSchema, 
-    showAttendanceSchema 
+const {
+    adminSignupSchema,
+    adminSigninSchema,
+    createClassSchema,
+    updateAttendanceSchema,
+    showAttendanceSchema,
+    addStudentsSchema
 } = require("../validations/admin.validation.js");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -15,7 +16,7 @@ const jwt = require("jsonwebtoken");
 const adminRouter = Router();
 
 adminRouter.post("/signup", validateRequest(adminSignupSchema), (req, res) => {
-    const {name, email, password} = req.body;
+    const { name, email, password } = req.body;
 
     bcrypt.hash(password, 10, async (err, hashedPassword) => {
         if (err) {
@@ -23,7 +24,7 @@ adminRouter.post("/signup", validateRequest(adminSignupSchema), (req, res) => {
                 message: "Error in hashing password"
             });
         }
-        
+
         try {
             const existingTeacher = await teacherModel.findOne({ email });
             if (existingTeacher) {
@@ -31,13 +32,13 @@ adminRouter.post("/signup", validateRequest(adminSignupSchema), (req, res) => {
                     message: "Email already exists"
                 });
             }
-            
+
             await teacherModel.create({
                 name: name,
                 email: email,
                 password: hashedPassword,
             });
-            
+
             res.status(201).json({
                 message: "Signup successful"
             });
@@ -70,12 +71,12 @@ adminRouter.post("/signin", validateRequest(adminSigninSchema), async (req, res)
                     message: "Error in comparing password"
                 });
             }
-            
+
             if (result) {
                 const token = jwt.sign({
                     id: admin._id,
                 }, process.env.JWT_ADMIN_PASSWORD);
-        
+
                 res.json({
                     token: token,
                     name: admin.name,
@@ -98,7 +99,7 @@ adminRouter.post("/signin", validateRequest(adminSigninSchema), async (req, res)
 adminRouter.post("/create-class", adminMiddleware, validateRequest(createClassSchema), async (req, res) => {
     const { name, wifiSSID } = req.body;
     const teacherId = req.userId;
-    
+
     try {
         const newClass = await classModel.create({
             name,
@@ -106,7 +107,7 @@ adminRouter.post("/create-class", adminMiddleware, validateRequest(createClassSc
             wifiSSID,
             students: []
         });
-        
+
         res.status(201).json({
             message: "Class created successfully",
             class: {
@@ -126,30 +127,30 @@ adminRouter.post("/create-class", adminMiddleware, validateRequest(createClassSc
 adminRouter.post("/update-attendance", adminMiddleware, validateRequest(updateAttendanceSchema), async (req, res) => {
     const { classId, date, wifiSSID, students } = req.body;
     const teacherId = req.userId;
-    
+
     try {
         // Verify the teacher owns this class
         const classExists = await classModel.findOne({
             _id: classId,
             teacherId: teacherId
         });
-        
+
         if (!classExists) {
             return res.status(403).json({
                 message: "You don't have permission to update attendance for this class"
             });
         }
-        
+
         // Check if the WiFi SSID matches the one set for the class
         if (classExists.wifiSSID && classExists.wifiSSID !== wifiSSID) {
             return res.status(400).json({
                 message: "WiFi network doesn't match the one set for this class"
             });
         }
-        
+
         // Format the date string to a Date object
         const attendanceDate = new Date(date);
-        
+
         // Check if attendance record already exists for this date and class
         let attendance = await attendanceModel.findOne({
             classId,
@@ -158,7 +159,7 @@ adminRouter.post("/update-attendance", adminMiddleware, validateRequest(updateAt
                 $lt: new Date(attendanceDate.setHours(23, 59, 59))
             }
         });
-        
+
         if (attendance) {
             // Update existing attendance record
             const updatedStudents = students.map(student => ({
@@ -166,7 +167,7 @@ adminRouter.post("/update-attendance", adminMiddleware, validateRequest(updateAt
                 present: student.present,
                 timestamp: new Date()
             }));
-            
+
             attendance.students = updatedStudents;
             attendance.wifiSSID = wifiSSID;
             await attendance.save();
@@ -177,7 +178,7 @@ adminRouter.post("/update-attendance", adminMiddleware, validateRequest(updateAt
                 present: student.present,
                 timestamp: new Date()
             }));
-            
+
             attendance = await attendanceModel.create({
                 classId,
                 date: attendanceDate,
@@ -185,7 +186,7 @@ adminRouter.post("/update-attendance", adminMiddleware, validateRequest(updateAt
                 students: studentRecords
             });
         }
-        
+
         res.status(200).json({
             message: "Attendance updated successfully",
             date: attendance.date
@@ -201,7 +202,7 @@ adminRouter.post("/update-attendance", adminMiddleware, validateRequest(updateAt
 adminRouter.get("/show-attendance", adminMiddleware, async (req, res) => {
     const { classId, startDate, endDate } = req.query;
     const teacherId = req.userId;
-    
+
     try {
         // Validate parameters
         try {
@@ -212,22 +213,22 @@ adminRouter.get("/show-attendance", adminMiddleware, async (req, res) => {
                 errors: error.errors
             });
         }
-        
+
         // Verify the teacher owns this class
         const classExists = await classModel.findOne({
             _id: classId,
             teacherId: teacherId
         });
-        
+
         if (!classExists) {
             return res.status(403).json({
                 message: "You don't have permission to view attendance for this class"
             });
         }
-        
+
         // Build date filter
         let dateFilter = {};
-        
+
         if (startDate && endDate) {
             dateFilter = {
                 $gte: new Date(new Date(startDate).setHours(0, 0, 0)),
@@ -242,20 +243,20 @@ adminRouter.get("/show-attendance", adminMiddleware, async (req, res) => {
                 $lte: new Date(new Date(endDate).setHours(23, 59, 59))
             };
         }
-        
+
         // Query attendance records
         const query = { classId };
         if (Object.keys(dateFilter).length > 0) {
             query.date = dateFilter;
         }
-        
+
         const attendanceRecords = await attendanceModel.find(query)
             .sort({ date: -1 })
             .populate({
                 path: 'students.studentId',
                 select: 'name studentId email'
             });
-        
+
         // Transform data for response
         const formattedRecords = attendanceRecords.map(record => ({
             date: record.date,
@@ -269,7 +270,7 @@ adminRouter.get("/show-attendance", adminMiddleware, async (req, res) => {
                 timestamp: student.timestamp
             }))
         }));
-        
+
         res.status(200).json({
             className: classExists.name,
             attendanceRecords: formattedRecords
@@ -283,44 +284,63 @@ adminRouter.get("/show-attendance", adminMiddleware, async (req, res) => {
 });
 
 // Route to add students to a class
-adminRouter.post("/add-students-to-class", adminMiddleware, async (req, res) => {
+adminRouter.post("/add-students-to-class", adminMiddleware, validateRequest(addStudentsSchema), async (req, res) => {
     const { classId, studentIds } = req.body;
     const teacherId = req.userId;
-    
+
     try {
-        // Validate input
-        if (!classId || !Array.isArray(studentIds)) {
-            return res.status(400).json({
-                message: "Invalid input. Please provide classId and an array of studentIds"
-            });
-        }
-        
         // Verify the teacher owns this class
         const classExists = await classModel.findOne({
             _id: classId,
             teacherId: teacherId
         });
-        
+
         if (!classExists) {
             return res.status(403).json({
                 message: "You don't have permission to modify this class"
             });
         }
-        
+
+        // Verify all student IDs exist
+        const existingStudents = await studentModel.countDocuments({
+            _id: { $in: studentIds }
+        });
+
+        if (existingStudents !== studentIds.length) {
+            return res.status(400).json({
+                message: "One or more student IDs are invalid"
+            });
+        }
+
         // Add students to class
         await classModel.findByIdAndUpdate(
             classId,
-            { $addToSet: { students: { $each: studentIds } } }
-        );
-        
+            {
+                $addToSet: { students: { $each: studentIds } }
+            });
+
         // Update students' classId
         await studentModel.updateMany(
             { _id: { $in: studentIds } },
             { $set: { classId: classId } }
         );
-        
+
+        // Get updated class with populated students
+        const updatedClass = await classModel.findById(classId)
+            .populate('students', 'name email studentId');
+
         res.status(200).json({
-            message: "Students added to class successfully"
+            message: "Students added to class successfully",
+            class: {
+                id: updatedClass._id,
+                name: updatedClass.name,
+                students: updatedClass.students.map(s => ({
+                    id: s._id,
+                    name: s.name,
+                    email: s.email,
+                    studentId: s.studentId
+                }))
+            }
         });
     } catch (error) {
         res.status(500).json({
@@ -333,14 +353,14 @@ adminRouter.post("/add-students-to-class", adminMiddleware, async (req, res) => 
 // Route to get all classes for a teacher
 adminRouter.get("/classes", adminMiddleware, async (req, res) => {
     const teacherId = req.userId;
-    
+
     try {
         const classes = await classModel.find({ teacherId })
             .populate({
                 path: 'students',
                 select: 'name studentId email'
             });
-        
+
         const formattedClasses = classes.map(cls => ({
             id: cls._id,
             name: cls.name,
@@ -353,7 +373,7 @@ adminRouter.get("/classes", adminMiddleware, async (req, res) => {
                 email: student.email
             }))
         }));
-        
+
         res.status(200).json({
             classes: formattedClasses
         });
@@ -368,31 +388,31 @@ adminRouter.get("/classes", adminMiddleware, async (req, res) => {
 // Route to get attendance summary statistics
 adminRouter.get("/attendance-summary", adminMiddleware, async (req, res) => {
     const teacherId = req.userId;
-    
+
     try {
         // Get all classes for this teacher
         const teacherClasses = await classModel.find({ teacherId });
         const classIds = teacherClasses.map(cls => cls._id);
-        
+
         // If no classes found, return empty summary
         if (classIds.length === 0) {
             return res.status(200).json([]);
         }
-        
+
         // Get attendance records for all classes
-        const attendanceRecords = await attendanceModel.find({ 
-            classId: { $in: classIds } 
+        const attendanceRecords = await attendanceModel.find({
+            classId: { $in: classIds }
         });
-        
+
         // Process attendance data by class
         const summary = [];
-        
+
         for (const classObj of teacherClasses) {
             // Get records for this class
             const classAttendance = attendanceRecords.filter(
                 record => record.classId.toString() === classObj._id.toString()
             );
-            
+
             if (classAttendance.length === 0) {
                 summary.push({
                     classId: classObj._id,
@@ -404,16 +424,16 @@ adminRouter.get("/attendance-summary", adminMiddleware, async (req, res) => {
                 });
                 continue;
             }
-            
+
             // Calculate statistics for this class
             let totalStudentEntries = 0;
             let totalPresent = 0;
-            
+
             for (const record of classAttendance) {
                 totalStudentEntries += record.students.length;
                 totalPresent += record.students.filter(student => student.present).length;
             }
-            
+
             summary.push({
                 classId: classObj._id,
                 className: classObj.name,
@@ -423,7 +443,7 @@ adminRouter.get("/attendance-summary", adminMiddleware, async (req, res) => {
                 attendanceRate: totalStudentEntries > 0 ? (totalPresent / totalStudentEntries) * 100 : 0
             });
         }
-        
+
         res.status(200).json(summary);
     } catch (error) {
         res.status(500).json({
@@ -436,20 +456,20 @@ adminRouter.get("/attendance-summary", adminMiddleware, async (req, res) => {
 // Route to get total student count
 adminRouter.get("/students-count", adminMiddleware, async (req, res) => {
     const teacherId = req.userId;
-    
+
     try {
         // Get all classes for this teacher
         const teacherClasses = await classModel.find({ teacherId });
         const classIds = teacherClasses.map(cls => cls._id);
-        
+
         // Get unique student count (students might be in multiple classes)
         const uniqueStudentCount = await studentModel.countDocuments({
             classId: { $in: classIds }
         });
-        
+
         // Count students by class
         const studentsByClass = [];
-        
+
         for (const classObj of teacherClasses) {
             const count = await studentModel.countDocuments({ classId: classObj._id });
             studentsByClass.push({
@@ -458,7 +478,7 @@ adminRouter.get("/students-count", adminMiddleware, async (req, res) => {
                 count: count
             });
         }
-        
+
         res.status(200).json({
             total: uniqueStudentCount,
             byClass: studentsByClass
@@ -473,7 +493,7 @@ adminRouter.get("/students-count", adminMiddleware, async (req, res) => {
 
 adminRouter.get("/profile", adminMiddleware, async (req, res) => {
     const teacherId = req.userId;
-    
+
     try {
         const teacher = await teacherModel.findById(teacherId)
             .select('-password') // Exclude password from the response
@@ -511,6 +531,56 @@ adminRouter.get("/profile", adminMiddleware, async (req, res) => {
     } catch (error) {
         res.status(500).json({
             message: "Failed to fetch teacher profile",
+            error: error.message
+        });
+    }
+});
+
+// Route to get all students (filterable by class)
+adminRouter.get("/students", adminMiddleware, async (req, res) => {
+    const { classId } = req.query;
+    const teacherId = req.userId;
+
+    try {
+        let query = {};
+
+        // If classId is provided, verify the teacher owns this class
+        if (classId) {
+            const classExists = await classModel.findOne({
+                _id: classId,
+                teacherId: teacherId
+            });
+
+            if (!classExists) {
+                return res.status(403).json({
+                    message: "You don't have permission to view students in this class"
+                });
+            }
+
+            query.classId = classId;
+        } else {
+            // If no classId, get all classes by this teacher and their students
+            const teacherClasses = await classModel.find({ teacherId });
+            const classIds = teacherClasses.map(c => c._id);
+            query.classId = { $in: classIds };
+        }
+
+        const students = await studentModel.find(query)
+            .select('-password') // Exclude passwords
+            .sort({ name: 1 });
+
+        res.status(200).json({
+            students: students.map(student => ({
+                id: student._id,
+                name: student.name,
+                email: student.email,
+                studentId: student.studentId,
+                classId: student.classId
+            }))
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to fetch students",
             error: error.message
         });
     }
