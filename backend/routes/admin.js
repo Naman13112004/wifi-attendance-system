@@ -289,6 +289,13 @@ adminRouter.post("/add-students-to-class", adminMiddleware, validateRequest(addS
     const teacherId = req.userId;
 
     try {
+        // Validate input
+        if (!classId || !Array.isArray(studentIds)) {
+            return res.status(400).json({
+                message: "Invalid input. Please provide classId and an array of studentIds"
+            });
+        }
+
         // Verify the teacher owns this class
         const classExists = await classModel.findOne({
             _id: classId,
@@ -302,22 +309,26 @@ adminRouter.post("/add-students-to-class", adminMiddleware, validateRequest(addS
         }
 
         // Verify all student IDs exist
-        const existingStudents = await studentModel.countDocuments({
+        const existingStudents = await studentModel.find({
             _id: { $in: studentIds }
-        });
+        }).select('_id');
 
-        if (existingStudents !== studentIds.length) {
+        if (existingStudents.length !== studentIds.length) {
+            const invalidIds = studentIds.filter(id => 
+                !existingStudents.some(s => s._id.toString() === id)
+            );
             return res.status(400).json({
-                message: "One or more student IDs are invalid"
+                message: "One or more student IDs are invalid",
+                invalidIds
             });
         }
 
-        // Add students to class
+        // Add students to class (using $addToSet to prevent duplicates)
         await classModel.findByIdAndUpdate(
             classId,
-            {
-                $addToSet: { students: { $each: studentIds } }
-            });
+            { $addToSet: { students: { $each: studentIds } } },
+            { new: true }
+        );
 
         // Update students' classId
         await studentModel.updateMany(
@@ -325,25 +336,16 @@ adminRouter.post("/add-students-to-class", adminMiddleware, validateRequest(addS
             { $set: { classId: classId } }
         );
 
-        // Get updated class with populated students
-        const updatedClass = await classModel.findById(classId)
-            .populate('students', 'name email studentId');
-
+        // Return success response with minimal data
         res.status(200).json({
+            success: true,
             message: "Students added to class successfully",
-            class: {
-                id: updatedClass._id,
-                name: updatedClass.name,
-                students: updatedClass.students.map(s => ({
-                    id: s._id,
-                    name: s.name,
-                    email: s.email,
-                    studentId: s.studentId
-                }))
-            }
+            addedCount: studentIds.length
         });
     } catch (error) {
+        console.error("Error adding students:", error);
         res.status(500).json({
+            success: false,
             message: "Failed to add students to class",
             error: error.message
         });

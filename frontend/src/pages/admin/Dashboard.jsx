@@ -34,11 +34,13 @@ const AdminDashboard = () => {
           api.get('/admin/attendance-summary'),
           api.get('/admin/students-count')
         ])
-        
+
+        console.log("Classes: " + classesRes.data.classes);
+
         setClasses(classesRes.data.classes)
         setAttendanceSummary(summaryRes.data)
         setStudentsCount(countRes.data)
-        
+
         if (classesRes.data.classes.length > 0 && !selectedClass) {
           setSelectedClass(classesRes.data.classes[0].id)
         }
@@ -48,7 +50,7 @@ const AdminDashboard = () => {
         setLoading(false)
       }
     }
-    
+
     fetchData()
   }, [selectedClass])
 
@@ -68,21 +70,32 @@ const AdminDashboard = () => {
 
   const handleAddStudents = async (studentIds) => {
     try {
-      await api.post('/admin/add-students-to-class', {
+      const response = await api.post('/admin/add-students-to-class', {
         classId: selectedClass,
-        studentIds
-      })
-      toast.success('Students added to class successfully!')
-      setIsAddStudentsModalOpen(false)
-      // Refresh data
-      const [classesRes, countRes] = await Promise.all([
-        api.get('/admin/classes'),
-        api.get('/admin/students-count')
-      ])
-      setClasses(classesRes.data.classes)
-      setStudentsCount(countRes.data)
+        studentIds: studentIds.map(id => id) // Ensure it's a plain array
+      });
+
+      if (response.data.success) {
+        toast.success(`Successfully added ${response.data.addedCount} students`);
+        setIsAddStudentsModalOpen(false);
+
+        // Refresh data
+        const [classesRes, countRes] = await Promise.all([
+          api.get('/admin/classes'),
+          api.get('/admin/students-count')
+        ]);
+        setClasses(classesRes.data.classes);
+        setStudentsCount(countRes.data);
+      } else {
+        toast.error(response.data.message || 'Failed to add students');
+      }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to add students')
+      console.error("Add students error:", error);
+      if (error.response?.data?.invalidIds) {
+        toast.error(`Invalid student IDs: ${error.response.data.invalidIds.join(', ')}`);
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to add students');
+      }
     }
   }
 
@@ -95,7 +108,7 @@ const AdminDashboard = () => {
           <h1 className="text-2xl font-bold text-indigo-600">Admin Dashboard</h1>
           <div className="flex items-center gap-4">
             <span className="text-gray-700">Welcome, {user?.name}</span>
-            <button 
+            <button
               onClick={logout}
               className="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition"
             >
@@ -104,7 +117,7 @@ const AdminDashboard = () => {
           </div>
         </div>
       </header>
-      
+
       <main className="container mx-auto px-4 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Sidebar */}
@@ -116,31 +129,31 @@ const AdminDashboard = () => {
           >
             <div className="bg-white p-6 rounded-xl shadow sticky top-8">
               <h2 className="text-xl font-semibold mb-4">Quick Stats</h2>
-              
+
               <div className="space-y-4">
                 <div className="p-4 bg-blue-50 rounded-lg">
                   <p className="text-sm text-blue-600">Total Classes</p>
                   <p className="text-2xl font-bold">{classes.length}</p>
                 </div>
-                
+
                 <div className="p-4 bg-green-50 rounded-lg">
                   <p className="text-sm text-green-600">Total Students</p>
                   <p className="text-2xl font-bold">{studentsCount.total}</p>
                 </div>
-                
+
                 {attendanceSummary.length > 0 && (
                   <div className="p-4 bg-purple-50 rounded-lg">
                     <p className="text-sm text-purple-600">Avg Attendance</p>
                     <p className="text-2xl font-bold">
                       {(
-                        attendanceSummary.reduce((sum, item) => sum + item.attendanceRate, 0) / 
+                        attendanceSummary.reduce((sum, item) => sum + item.attendanceRate, 0) /
                         attendanceSummary.length
                       ).toFixed(1)}%
                     </p>
                   </div>
                 )}
               </div>
-              
+
               <div className="mt-8">
                 <h3 className="text-lg font-medium mb-2">Students by Class</h3>
                 <div className="h-64">
@@ -168,7 +181,7 @@ const AdminDashboard = () => {
               </div>
             </div>
           </motion.div>
-          
+
           {/* Main Content */}
           <div className="lg:w-3/4">
             <div className="flex border-b mb-6">
@@ -176,17 +189,16 @@ const AdminDashboard = () => {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2 font-medium ${
-                    activeTab === tab
+                  className={`px-4 py-2 font-medium ${activeTab === tab
                       ? 'border-b-2 border-indigo-600 text-indigo-600'
                       : 'text-gray-500 hover:text-gray-700'
-                  }`}
+                    }`}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </div>
-            
+
             {activeTab === 'classes' && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -204,29 +216,29 @@ const AdminDashboard = () => {
                     Create New Class
                   </motion.button>
                 </div>
-                
-                <ClassManagement 
-                  classes={classes} 
+
+                <ClassManagement
+                  classes={classes}
                   selectedClass={selectedClass}
                   onSelectClass={setSelectedClass}
                   attendanceSummary={attendanceSummary}
                 />
               </motion.div>
             )}
-            
+
             {activeTab === 'attendance' && selectedClass && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <AttendanceManagement 
-                  classId={selectedClass} 
-                  classes={classes} 
+                <AttendanceManagement
+                  classId={selectedClass}
+                  classes={classes}
                 />
               </motion.div>
             )}
-            
+
             {activeTab === 'students' && selectedClass && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -244,24 +256,24 @@ const AdminDashboard = () => {
                     Add Students
                   </motion.button>
                 </div>
-                
-                <StudentManagement 
-                  classId={selectedClass} 
-                  classes={classes} 
+
+                <StudentManagement
+                  classId={selectedClass}
+                  classes={classes}
                 />
               </motion.div>
             )}
           </div>
         </div>
       </main>
-      
-      <CreateClassModal 
+
+      <CreateClassModal
         isOpen={isCreateClassModalOpen}
         onClose={() => setIsCreateClassModalOpen(false)}
         onSubmit={handleCreateClass}
       />
-      
-      <AddStudentsModal 
+
+      <AddStudentsModal
         isOpen={isAddStudentsModalOpen}
         onClose={() => setIsAddStudentsModalOpen(false)}
         onSubmit={handleAddStudents}

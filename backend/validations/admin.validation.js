@@ -59,13 +59,25 @@ const showAttendanceSchema = z.object({
 
 const addStudentsSchema = z.object({
   classId: z.string().refine(isValidObjectId, {
-      message: "Invalid class ID format"
+    message: "Invalid class ID format"
   }),
   studentIds: z.array(
-      z.string().refine(isValidObjectId, {
-          message: "Invalid student ID format"
-      })
+    z.string().refine(isValidObjectId, {
+      message: "Invalid student ID format"
+    })
   ).min(1, "At least one student ID is required")
+    .refine(
+      async (studentIds) => {
+        const existingCount = await studentModel.countDocuments({
+          _id: { $in: studentIds }
+        });
+        return existingCount === studentIds.length;
+      },
+      {
+        message: "One or more student IDs don't exist",
+        path: ["studentIds"]
+      }
+    )
 });
 
 module.exports = {
